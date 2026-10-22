@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 
 
-# Image Files Handling
+# IMAGE FILE/FOLDER FUNCTIONS
 
 IMG_EXTS = ('.jpg', '.jpeg', '.png', '.bmp', '.tiff')
 
@@ -37,17 +37,18 @@ def loadImagesFromFolder(path):
     
     return img
 
+# FEATURE HANDLING FUNCTIONS
+
 def tiny(img):
     """Placeholder: 8x8 colour thumbnail. Only used to test the pipeline."""
     return cv2.resize(img, (8, 8), interpolation=cv2.INTER_AREA).astype(np.float32).ravel()
-
-
-# Features Handling Functions
 
 FEATURES = {"tiny": tiny}
 
 def extract(name, img):
     return FEATURES[name](img)
+
+# DISTANCE FUNCTIONS
 
 def ssd(q, db):
     """
@@ -56,7 +57,7 @@ def ssd(q, db):
     diff = db.astype(np.float32) - q.astype(np.float32)
     return np.sum(diff * diff, axis=1)
 
-# Distance Functions
+
 DISTANCES = {"ssd": ssd}
 
 def rank(dists, names, target_name, n, worst=False):
@@ -95,7 +96,7 @@ def make_tile(image, label, h=180):
                 (255, 255, 255), 1, cv2.LINE_AA)
     return t
 
-def row(tiles):
+def make_row(tiles):
     return cv2.hconcat(tiles)
 
 def stack_rows(rows):
