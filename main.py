@@ -4,13 +4,25 @@ import os
 import cv2
 import numpy as np
 
-from utils import (FEATURES, DISTANCES, list_images, load_image,
-                   rank, make_tile, make_row, stack_rows)
+from utils import (FEATURES, DISTANCES, sortImagesByName, loadImagesFromFolder,
+                   rank, tile, row, stack_rows)
+
+DEFAULT_DB = "olympus"
+
+
+def load_or_none(path):
+    """Your loader returns None on failure; this also catches an exception."""
+    try:
+        return loadImagesFromFolder(path)
+    except Exception as e:
+        print("error:", e)
+        return None
+
 
 def main():
     ap = argparse.ArgumentParser(description="Content-based image retrieval")
     ap.add_argument("--target", required=True, help="target image path or filename")
-    ap.add_argument("--db", required=True, help="folder of database images")
+    ap.add_argument("--db", default=DEFAULT_DB, help="folder of database images")
     ap.add_argument("--feature", default="tiny", choices=sorted(FEATURES))
     ap.add_argument("--metric", default="ssd", choices=sorted(DISTANCES))
     ap.add_argument("--n", type=int, default=3, help="number of matches")
@@ -19,26 +31,29 @@ def main():
     ap.add_argument("--show", action="store_true", help="open a window")
     args = ap.parse_args()
 
-    # Resolve the target: use the path as given, else look in the database folder
+    # Resolve the target: use the path as given, else look inside the database folder
     target_path = args.target
     if not os.path.exists(target_path):
         target_path = os.path.join(args.db, args.target)
     target_name = os.path.basename(target_path)
-    target_img = load_image(target_path)
+    target_img = load_or_none(target_path)
+    if target_img is None:
+        raise SystemExit(f"Could not read target image: {target_path}")
 
     feature_fn = FEATURES[args.feature]
     q = feature_fn(target_img)
 
-    # Compute features for the whole database
+    # Features for the whole database
     names, feats = [], []
-    for name in list_images(args.db):
-        try:
-            feats.append(feature_fn(load_image(os.path.join(args.db, name))))
-            names.append(name)
-        except FileNotFoundError as e:
-            print("skipped:", e)
+    for name in sortImagesByName(args.db):
+        img = load_or_none(os.path.join(args.db, name))
+        if img is None:
+            print("skipped:", name)
+            continue
+        feats.append(feature_fn(img))
+        names.append(name)
     if not names:
-        raise SystemExit("No images found in the database folder.")
+        raise SystemExit(f"No readable images found in: {args.db}")
 
     dists = DISTANCES[args.metric](q, np.stack(feats))
 
@@ -55,26 +70,33 @@ def main():
         for name, d in bottom:
             print(f"  {name}  {d:.4f}")
 
-    # Montage
+    # Montage and windows
     if args.save or args.show:
         def tiles_for(pairs):
-            return [make_tile(load_image(os.path.join(args.db, nm)), f"{nm} {d:.3f}")
+            return [tile(load_or_none(os.path.join(args.db, nm)), f"{nm} {d:.3f}")
                     for nm, d in pairs]
 
-        sheet = make_row([make_tile(target_img, "TARGET " + target_name)] + tiles_for(top))
-        rows = [make_row([make_tile(target_img, "TARGET " + target_name)] + tiles_for(top))]
-        if bottom:
-            rows.append(make_row(tiles_for(bottom)))
-            sheet = stack_rows(rows)
-        
+        target_tile = tile(target_img, "TARGET " + target_name, h=360)
+        top_row = row(tiles_for(top))
+        bottom_row = row(tiles_for(bottom)) if bottom else None
+
         if args.save:
+            rows = [row([tile(target_img, "TARGET " + target_name)] + tiles_for(top))]
+            if bottom_row is not None:
+                rows.append(bottom_row)
             os.makedirs(os.path.dirname(args.save) or ".", exist_ok=True)
-            cv2.imwrite(args.save, sheet)
+            cv2.imwrite(args.save, stack_rows(rows))
+
         if args.show:
-            cv2.imshow("results", sheet)
+            cv2.imshow("Target", target_tile)
+            cv2.moveWindow("Target", 20, 20)
+            cv2.imshow("Top matches", top_row)
+            cv2.moveWindow("Top matches", 20 + target_tile.shape[1] + 20, 20)
+            if bottom_row is not None:
+                cv2.imshow("Least similar", bottom_row)
+                cv2.moveWindow("Least similar", 20 + target_tile.shape[1] + 20, 300)
             cv2.waitKey(0)
             cv2.destroyAllWindows()
-
 
 if __name__ == "__main__":
     main()

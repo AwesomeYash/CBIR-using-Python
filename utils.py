@@ -88,7 +88,7 @@ def rank(dists, names, target_name, n, worst=False):
 
 
 # Display Functions 
-def make_tile(image, label, h=180):
+def tile(image, label, h=180):
     scale = h / image.shape[0]
     t = cv2.resize(image, (max(1, int(image.shape[1] * scale)), h))
     cv2.rectangle(t, (0, 0), (t.shape[1], 22), (0, 0, 0), -1)
@@ -96,7 +96,7 @@ def make_tile(image, label, h=180):
                 (255, 255, 255), 1, cv2.LINE_AA)
     return t
 
-def make_row(tiles):
+def row(tiles):
     return cv2.hconcat(tiles)
 
 def stack_rows(rows):
