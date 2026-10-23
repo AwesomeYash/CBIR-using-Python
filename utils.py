@@ -32,6 +32,7 @@ def loadImagesFromFolder(path):
 
 # FEATURE HANDLING FUNCTIONS
 
+# Trial Function
 def tiny(img):
     """
     Placeholder: 8x8 colour thumbnail. Only used to test the pipeline.
@@ -53,6 +54,7 @@ def center_patch(img, patch_size=7):
     
     return patch.astype(np.float32).ravel()
 
+# R-G Histogram
 def rg_hist(img, bins=16):
     """
     Computes a 2D histogram of the R and G channels of the image.
@@ -76,7 +78,34 @@ def rg_hist(img, bins=16):
 
     return hist
 
-FEATURES = {"tiny": tiny, "baseline": center_patch, "rghist": rg_hist}
+# Multi-Histogram Helper 
+def rgb_hist(region, bins=8):
+    """
+    Computes a 3D histogram of the R, G, and B channels of the image into a single feature vector.
+    """
+    q = (region // ( 256.0 // bins)).reshape(-1, 3).astype(np.int64)  # Normalize to [0, 1]
+    pixel_idx = q[:, 0] * bins * bins + q[:, 1] * bins + q[:, 2]
+
+    hist = np.bincount(pixel_idx, minlength=bins**3).astype(np.float32)
+    total = np.sum(hist)
+
+    if total > 0:
+        hist = hist / total  # Normalize histogram to sum to 1
+
+    return hist
+
+# Multi-Histogram Feature for top and bottom halves of the image
+def multi_hist(img):
+    """Feature vector of 2 * HIST_LEN values: [top-half hist, bottom-half hist].
+
+    The split uses this image's own height, so images of different sizes work.
+    """
+    h = img.shape[0]
+    top = img[: h // 2]
+    bottom = img[h // 2 :]
+    return np.concatenate([rgb_hist(top), rgb_hist(bottom)])
+
+FEATURES = {"tiny": tiny, "baseline": center_patch, "rghist": rg_hist, "multihist": multi_hist}
 
 def extract(name, img):
     return FEATURES[name](img)
@@ -94,19 +123,27 @@ def intersect(q, db):
     """Histogram intersection distance: 0 means identical."""
     return 1.0 - np.minimum(db, q).sum(axis=1)
 
-DISTANCES = {"ssd": ssd, "intersect": intersect}
+def multi_dist(q, db, w_top=0.5, w_bottom=0.5):
+    """Distance between a query and every row of db, for multi_hist features.
+
+    Each half is compared with histogram intersection (1 - sum of minimums),
+    then the two distances are combined with the given weights. Returns one
+    distance per database row; 0 means identical.
+    """
+    n = 256         # Number of bins per half of the histogram
+    d_top = 1.0 - np.minimum(db[:, :n], q[:n]).sum(axis=1)
+    d_bottom = 1.0 - np.minimum(db[:, n:], q[n:]).sum(axis=1)
+    return w_top * d_top + w_bottom * d_bottom
+
+DISTANCES = {"ssd": ssd, "intersect": intersect, "multidist": multi_dist}
+
+# DISPLAY FUNCTIONS
 
 def rank(dists, names, target_name, n, worst=False):
     """
     Ranks the distances and returns the top n results.
+    """
 
-    Args:
-        dists (np.ndarray): Array of distances.
-        names (list): List of corresponding names.
-        target_name (str): The name to compare against.
-        n (int): Number of top results to return.
-        worst (bool): If True, returns the worst matches instead of the best.
-        """
     order = np.argsort(dists, kind = "stable")
     if worst:
         order = order[::-1]  # Sort in descending order for worst matches
@@ -121,8 +158,10 @@ def rank(dists, names, target_name, n, worst=False):
     
     return out
 
-# Display Functions 
 def tile(image, label, h=180):
+    """
+    Creates a tile of the image with a label at the top. The image is resized to have height h.
+    """
     scale = h / image.shape[0]
     t = cv2.resize(image, (max(1, int(image.shape[1] * scale)), h))
     cv2.rectangle(t, (0, 0), (t.shape[1], 22), (0, 0, 0), -1)
