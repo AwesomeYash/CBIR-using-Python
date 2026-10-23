@@ -53,7 +53,30 @@ def center_patch(img, patch_size=7):
     
     return patch.astype(np.float32).ravel()
 
-FEATURES = {"tiny": tiny, "baseline": center_patch}
+def rg_hist(img, bins=16):
+    """
+    Computes a 2D histogram of the R and G channels of the image.
+    """
+    img = img.astype(np.float32)
+    b, g, r = img[:, :, 0], img[:, :, 1], img[:, :, 2]
+    s = r + g + b
+    mask = s > 0
+
+    # For a completely black image, return a zero histogram
+    if not np.any(mask):
+        return np.zeros((bins, bins), dtype=np.float32)  # Return a zero histogram if no valid pixels
+    
+    rn = (r[mask] / s[mask]).astype(np.float32).reshape(-1, 1)
+    gn = (g[mask] / s[mask]).astype(np.float32).reshape(-1, 1)
+
+    # Compute 2D histogram of normalized R and G channels
+    hist = cv2.calcHist([rn, gn], [0, 1], None, [bins, bins], [0, 1.0001, 0, 1.0001])
+    hist = hist.ravel().astype(np.float32)  # Normalize histogram
+    hist /= np.sum(hist)  # Normalize to sum to 1
+
+    return hist
+
+FEATURES = {"tiny": tiny, "baseline": center_patch, "rghist": rg_hist}
 
 def extract(name, img):
     return FEATURES[name](img)
@@ -67,8 +90,11 @@ def ssd(q, db):
     diff = db.astype(np.float32) - q.astype(np.float32)
     return np.sum(diff * diff, axis=1)
 
+def intersect(q, db):
+    """Histogram intersection distance: 0 means identical."""
+    return 1.0 - np.minimum(db, q).sum(axis=1)
 
-DISTANCES = {"ssd": ssd}
+DISTANCES = {"ssd": ssd, "intersect": intersect}
 
 def rank(dists, names, target_name, n, worst=False):
     """
