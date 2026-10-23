@@ -1,6 +1,5 @@
 import argparse
 import os
-
 import cv2
 import numpy as np
 
@@ -9,7 +8,6 @@ from utils import (FEATURES, DISTANCES, sortImagesByName, loadImagesFromFolder,
 
 DEFAULT_DB = "olympus"
 
-
 def load_or_none(path):
     """Your loader returns None on failure; this also catches an exception."""
     try:
@@ -17,7 +15,6 @@ def load_or_none(path):
     except Exception as e:
         print("error:", e)
         return None
-
 
 def main():
     ap = argparse.ArgumentParser(description="Content-based image retrieval")

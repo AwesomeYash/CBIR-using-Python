@@ -2,7 +2,6 @@ import os
 import cv2
 import numpy as np
 
-
 # IMAGE FILE/FOLDER FUNCTIONS
 
 IMG_EXTS = ('.jpg', '.jpeg', '.png', '.bmp', '.tiff')
@@ -10,12 +9,6 @@ IMG_EXTS = ('.jpg', '.jpeg', '.png', '.bmp', '.tiff')
 def sortImagesByName(folder_path):
     """
     Sorts a list of image paths by their file names.
-
-    Args:
-        folder_path (str): Path to the folder containing image files.
-
-    Returns:
-        list: Sorted list of image file paths.
     """
     return sorted([f for f in os.listdir(folder_path) if f.lower().endswith(IMG_EXTS)])
 
@@ -40,10 +33,27 @@ def loadImagesFromFolder(path):
 # FEATURE HANDLING FUNCTIONS
 
 def tiny(img):
-    """Placeholder: 8x8 colour thumbnail. Only used to test the pipeline."""
+    """
+    Placeholder: 8x8 colour thumbnail. Only used to test the pipeline.
+    """
     return cv2.resize(img, (8, 8), interpolation=cv2.INTER_AREA).astype(np.float32).ravel()
 
-FEATURES = {"tiny": tiny}
+# Center 7x7 patch for image matching 
+def center_patch(img, patch_size=7):
+    """  
+    Extracts the 7x7 center patch from the given image. and compares it with other using SSD distance metric.
+    """
+    h, w = img.shape[:2]
+    if h < patch_size or w < patch_size:
+        raise ValueError(f"Image dimensions ({h}, {w}) are smaller than the patch size ({patch_size}).")
+    
+    r = patch_size // 2
+    y, x = h // 2, w // 2
+    patch = img[y - r : y + r + 1, x - r : x + r + 1]
+    
+    return patch.astype(np.float32).ravel()
+
+FEATURES = {"tiny": tiny, "baseline": center_patch}
 
 def extract(name, img):
     return FEATURES[name](img)
@@ -76,7 +86,6 @@ def rank(dists, names, target_name, n, worst=False):
         order = order[::-1]  # Sort in descending order for worst matches
     
     out = []
-
     for i in order:
         if names[i] == target_name:
             continue
@@ -86,14 +95,12 @@ def rank(dists, names, target_name, n, worst=False):
     
     return out
 
-
 # Display Functions 
 def tile(image, label, h=180):
     scale = h / image.shape[0]
     t = cv2.resize(image, (max(1, int(image.shape[1] * scale)), h))
     cv2.rectangle(t, (0, 0), (t.shape[1], 22), (0, 0, 0), -1)
-    cv2.putText(t, label, (4, 16), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
-                (255, 255, 255), 1, cv2.LINE_AA)
+    cv2.putText(t, label, (4, 16), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
     return t
 
 def row(tiles):
