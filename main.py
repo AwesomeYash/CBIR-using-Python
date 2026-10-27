@@ -2,9 +2,8 @@ import argparse
 import os
 import cv2
 import numpy as np
-
 from utils import (FEATURES, DISTANCES, sortImagesByName, loadImagesFromFolder,
-                   rank, tile, row, stack_rows)
+                   loadEmbeddingsFromFolder, rank, tile, row, stack_rows, shoe_classic, shoe_dist)
 
 DEFAULT_DB = "olympus"
 
@@ -20,8 +19,9 @@ def main():
     ap = argparse.ArgumentParser(description="Content-based image retrieval")
     ap.add_argument("--target", required=True, help="target image path or filename")
     ap.add_argument("--db", default=DEFAULT_DB, help="folder of database images")
-    ap.add_argument("--feature", default="tiny", choices=sorted(FEATURES))
+    ap.add_argument("--feature", default="tiny", choices=sorted(list(FEATURES) + ["dnn", "shoe"]))
     ap.add_argument("--metric", default="ssd", choices=sorted(DISTANCES))
+    ap.add_argument("--csv", default="ResNet18_olym.csv", help="ResNet Embeddings file")
     ap.add_argument("--n", type=int, default=3, help="number of matches")
     ap.add_argument("--worst", action="store_true", help="also show least similar")
     ap.add_argument("--save", help="write a montage PNG to this path")
@@ -37,22 +37,50 @@ def main():
     if target_img is None:
         raise SystemExit(f"Could not read target image: {target_path}")
 
-    feature_fn = FEATURES[args.feature]
-    q = feature_fn(target_img)
+    # --- Features: from the CSV (dnn) or computed from the images ---
+    if args.feature == "dnn":
+        names, feats = loadEmbeddingsFromFolder(args.csv)
+        if target_name not in names:
+            raise SystemExit(f"{target_name} not found in {args.csv}")
+        q = feats[names.index(target_name)]
+    
+    elif args.feature == "shoe":
+            names, emb = loadEmbeddingsFromFolder(args.csv)
+            if target_name not in names:
+                raise SystemExit(f"{target_name} not found in {args.csv}")
 
-    # Features for the whole database
-    names, feats = [], []
-    for name in sortImagesByName(args.db):
-        img = load_or_none(os.path.join(args.db, name))
-        if img is None:
-            print("skipped:", name)
-            continue
-        feats.append(feature_fn(img))
-        names.append(name)
-    if not names:
-        raise SystemExit(f"No readable images found in: {args.db}")
+            # Loop in the CSV's order so the embedding and classic parts stay aligned.
+            kept_names, rows_ = [], []
+            for i, name in enumerate(names):
+                img = load_or_none(os.path.join(args.db, name))
+                if img is None:
+                    print("skipped:", name)
+                    continue                      # drops the embedding row too
+                kept_names.append(name)
+                rows_.append(np.concatenate([emb[i], shoe_classic(img)]))
 
-    dists = DISTANCES[args.metric](q, np.stack(feats))
+            names = kept_names
+            feats = np.stack(rows_)               # shape (N, 780)
+            q = feats[names.index(target_name)]
+    
+    else:
+        feature_fn = FEATURES[args.feature]
+        q = feature_fn(target_img)
+
+        names, feats = [], []
+        for name in sortImagesByName(args.db):
+            img = load_or_none(os.path.join(args.db, name))
+            if img is None:
+                print("skipped:", name)
+                continue
+            feats.append(feature_fn(img))
+            names.append(name)
+        if not names:
+            raise SystemExit(f"No readable images found in: {args.db}")
+        feats = np.stack(feats)
+
+    # --- Distances ---
+    dists = DISTANCES[args.metric](q, feats)
 
     # Rank and print
     top = rank(dists, names, target_name, args.n)
