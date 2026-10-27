@@ -105,13 +105,61 @@ def multi_hist(img):
     bottom = img[h // 2 :]
     return np.concatenate([rgb_hist(top), rgb_hist(bottom)])
 
-FEATURES = {"tiny": tiny, "baseline": center_patch, "rghist": rg_hist, "multihist": multi_hist}
+# HSV Histogram Feature
+def hsv_hist(img, bins=8):
+    """
+    Computes a 3D histogram of the H, S, and V channels of the image into a single feature vector.
+    """
+    hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV).astype(np.int32)
+    h = hsv_img[:, :, 0] * bins // 180  # Normalize H channel to [0, bins)
+    s = hsv_img[:, :, 1] * bins // 256  # Normalize S channel to [0, bins)
+    v = hsv_img[:, :, 2] * bins // 256  # Normalize V channel to [0, bins)
+    q = (h * bins * bins + s * bins + v).reshape(-1, 1)
+
+    hist = np.bincount(q[:, 0], minlength=bins**3).astype(np.float32)
+    
+    total = np.sum(hist)
+    if total > 0:
+        hist = hist / total  # Normalize histogram to sum to 1
+
+    return hist
+
+# Texture Feature
+def sobel_hist(img, bins=16):
+    """
+    Computes a histogram of the Sobel gradient magnitudes of the image.
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    sobelx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+    sobely = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+    magnitude = np.sqrt(sobelx * sobelx + sobely * sobely).astype(np.float32)
+
+    hist = np.histogram(magnitude, bins=bins, range=(0, 256))[0].astype(np.float32)
+    
+    total = np.sum(hist)
+    if total > 0:
+        hist = hist / total  # Normalize histogram to sum to 1
+
+    return hist
+
+# Combining the hsv_hist and sobel_hist features into a single feature vector
+def color_feature(img):
+    """
+    Combines HSV histogram and Sobel histogram features into a single feature vector.
+    """
+    hsv = hsv_hist(img)
+    sobel = sobel_hist(img)
+    return np.concatenate([hsv, sobel])
+
+FEATURES = {"tiny": tiny, "baseline": center_patch, "rghist": rg_hist, "multihist": multi_hist, "colortext": color_feature}
 
 def extract(name, img):
     return FEATURES[name](img)
 
+
 # DISTANCE FUNCTIONS
 
+# SSD (Sum of Squared Differences) distance between a query and database features
 def ssd(q, db):
     """
     q: (D,), db: (N, D) -> (N,)
@@ -119,10 +167,12 @@ def ssd(q, db):
     diff = db.astype(np.float32) - q.astype(np.float32)
     return np.sum(diff * diff, axis=1)
 
+# Histogram intersection distance: 0 means identical. Used for RG histogram matching
 def intersect(q, db):
     """Histogram intersection distance: 0 means identical."""
     return 1.0 - np.minimum(db, q).sum(axis=1)
 
+# Multi-histogram distance: 0 means identical. Used in multi_hist feature matching
 def multi_dist(q, db, w_top=0.5, w_bottom=0.5):
     """Distance between a query and every row of db, for multi_hist features.
 
@@ -135,7 +185,21 @@ def multi_dist(q, db, w_top=0.5, w_bottom=0.5):
     d_bottom = 1.0 - np.minimum(db[:, n:], q[n:]).sum(axis=1)
     return w_top * d_top + w_bottom * d_bottom
 
-DISTANCES = {"ssd": ssd, "intersect": intersect, "multidist": multi_dist}
+# 
+def color_texture_dist(q, db, w_color=0.5, w_texture=0.5):
+    """Distance between a query and every row of db, for color_texture features.
+
+    Each half is compared with histogram intersection (1 - sum of minimums),
+    then the two distances are combined with the given weights. Returns one
+    distance per database row; 0 means identical.
+    """
+    n = 512         # Number of bins per half of the histogram
+    d_color = 1.0 - np.minimum(db[:, :n], q[:n]).sum(axis=1)
+    d_texture = 1.0 - np.minimum(db[:, n:], q[n:]).sum(axis=1)
+    return w_color * d_color + w_texture * d_texture
+
+DISTANCES = {"ssd": ssd, "intersect": intersect, "multidist": multi_dist, "colortext": color_texture_dist}
+
 
 # DISPLAY FUNCTIONS
 
